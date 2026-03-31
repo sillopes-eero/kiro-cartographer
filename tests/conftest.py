@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 
-POWER_DIR = Path(__file__).resolve().parent.parent / "cartographer-power"
+POWER_DIR = Path(__file__).resolve().parent.parent
 
 
 def read_text(path: Path) -> str:
