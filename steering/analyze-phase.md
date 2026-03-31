@@ -79,13 +79,17 @@ For each assignment, invoke a subagent like this:
 invokeSubAgent(
   name: "general-task-execution",
   prompt: "<filled-in prompt template from Step 1>",
-  explanation: "Analyze files for modules: <module names> (<estimated_tokens> tokens)"
+  explanation: "Analyze files for modules: <module names> (<estimated_tokens> tokens)",
+  contextFiles: [{"path": "<file_path>"}, {"path": "<file_path>"}, ...]
 )
 ```
 
-- Use `"general-task-execution"` as the subagent name — this gives the subagent access to file reading tools.
-- The `prompt` is the fully filled-in template from Step 1.
-- The `explanation` should briefly describe which modules and how many tokens the subagent covers.
+All four parameters are **required**:
+
+- `name`: Always `"general-task-execution"` — this gives the subagent access to file reading tools.
+- `prompt`: The fully filled-in template from Step 1.
+- `explanation`: A brief description of which modules and how many tokens the subagent covers. **This parameter is required and must not be omitted.**
+- `contextFiles`: An array of objects with `path` keys for each file the subagent should analyze. This ensures the subagent has access to the files. List every file from the assignment's `files` list.
 
 ### Example
 
