@@ -68,6 +68,7 @@ If the assignment covers multiple modules, include a separate `## Module: <name>
 - Replace `<file_path>` entries with the actual file paths from the assignment's `files` list.
 - Replace `<module_name>` with the top-level directory name(s) from the assignment's `directories` field. If the assignment covers multiple modules, instruct the subagent to group its output by module.
 - Do not add any model selection parameters to the invocation.
+- Skip locale/i18n files (e.g., files under `locales/`, `i18n/`, `translations/`, or `_locales/` directories, and files like `*.po`, `*.mo`, `*.xliff`). These contain repeated translated strings across languages and don't provide architectural insight.
 
 ## Step 2: Spawn All Subagents in Parallel
 

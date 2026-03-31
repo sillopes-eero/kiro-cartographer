@@ -24,13 +24,13 @@ Cartographer uses a phased approach where the orchestrating agent plans the work
 1. **Check** — Determine if `docs/CODEBASE_MAP.md` already exists. If it does, detect changes using git commit hash, git timestamp, or scanner diff as fallbacks. Decide between full mapping and update mode.
    → See [steering/check-phase.md](steering/check-phase.md)
 
-2. **Scan** — Run the scanner script to get a file tree with token counts:
+2. **Scan** — Run the scanner script (bundled with this Power) against the user's project:
 
    ```bash
-   uv run scripts/scan-codebase.py . --format json
+   uv run <POWER_ROOT>/scripts/scan-codebase.py . --format json
    ```
 
-   Fallbacks: `python3 scripts/scan-codebase.py . --format json` or `python scripts/scan-codebase.py . --format json`
+   Fallbacks: `python3 <POWER_ROOT>/scripts/scan-codebase.py . --format json` or `python <POWER_ROOT>/scripts/scan-codebase.py . --format json`
 
 3. **Plan** — Analyze scan output and group files into subagent assignments. Balance token budgets at ~150,000 tokens per subagent. If more than 5 top-level modules are detected, prompt the user about Split_Mode.
    → See [steering/scan-plan-phase.md](steering/scan-plan-phase.md)
@@ -45,18 +45,24 @@ Cartographer uses a phased approach where the orchestrating agent plans the work
 
 ## Scanner Script
 
-The scanner is a Python script at `scripts/scan-codebase.py` that recursively scans a directory tree, respects `.gitignore` patterns, and counts tokens per file using tiktoken. It supports JSON, tree, and compact output formats.
+The scanner is a Python script at `scripts/scan-codebase.py` **within this Power's installation directory**. It recursively scans a directory tree, respects `.gitignore` patterns, and counts tokens per file using tiktoken. It supports JSON, tree, and compact output formats.
 
-Preferred invocation (auto-installs tiktoken via UV inline dependencies):
+### Locating the Script
+
+The script is bundled with this Power, not with the user's project. To find it at runtime, resolve the path relative to this Power's root directory. In all invocations below, `<POWER_ROOT>` refers to the directory containing this POWER.md file.
+
+### Invocation
+
+Preferred (auto-installs tiktoken via UV inline dependencies):
 
 ```bash
-uv run scripts/scan-codebase.py . --format json
+uv run <POWER_ROOT>/scripts/scan-codebase.py . --format json
 ```
 
-If UV is not available:
+Fallback if UV is not available:
 
 ```bash
-python3 scripts/scan-codebase.py . --format json
+python3 <POWER_ROOT>/scripts/scan-codebase.py . --format json
 ```
 
 If tiktoken is missing and not using UV:
@@ -64,6 +70,8 @@ If tiktoken is missing and not using UV:
 ```bash
 pip install tiktoken
 ```
+
+The `.` argument tells the scanner to scan the **user's current working directory** (the project being mapped), while the script path points to the Power's installation directory.
 
 ## Output
 

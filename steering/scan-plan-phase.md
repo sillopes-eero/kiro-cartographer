@@ -4,27 +4,38 @@ Run the codebase scanner to get a file inventory with token counts, then group f
 
 ## Step 1: Run the Scanner
 
-Execute the scanner script to produce a JSON inventory of the codebase. Try each command in order until one succeeds:
+The scanner script is bundled with this Power at `scripts/scan-codebase.py` relative to the Power's installation directory — **not** the user's project directory. In all commands below, `<POWER_ROOT>` refers to the directory containing POWER.md.
+
+Execute the scanner to produce a JSON inventory of the **user's project** (current working directory). Try each command in order until one succeeds:
 
 1. **Preferred** (auto-installs tiktoken via UV inline dependencies):
 
    ```bash
-   uv run scripts/scan-codebase.py . --format json
+   uv run <POWER_ROOT>/scripts/scan-codebase.py . --format json
    ```
 
 2. **Fallback — python3**:
 
    ```bash
-   python3 scripts/scan-codebase.py . --format json
+   python3 <POWER_ROOT>/scripts/scan-codebase.py . --format json
    ```
 
 3. **Fallback — python**:
 
    ```bash
-   python scripts/scan-codebase.py . --format json
+   python <POWER_ROOT>/scripts/scan-codebase.py . --format json
    ```
 
-All script paths are relative to the Power root directory.
+The `.` argument scans the user's current working directory. The script path must resolve to the Power's installation directory, not the user's project.
+
+### Locale / i18n Files
+
+Locale and internationalization files (e.g., `locales/`, `i18n/`, `translations/`, `*.po`, `*.mo`, `*.xliff`, `messages.json` under `_locales/`) contain repeated strings across languages and add significant token count without meaningful architectural insight. When planning subagent assignments:
+
+- Exclude locale/i18n files from subagent assignments by default.
+- Do not count their tokens toward module budgets.
+- List them as skipped in the scanner results summary shown to the user.
+- If the user explicitly asks to include them, respect that preference.
 
 ### Error Handling
 

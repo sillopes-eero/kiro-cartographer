@@ -55,13 +55,13 @@ git log --oneline --since="<last_mapped>"
 
 If both git-based methods fail (git unavailable, not a git repository, etc.):
 
-1. Run the scanner to get the current file list and counts:
+1. Run the scanner to get the current file list and counts (script is in the Power's installation directory at `<POWER_ROOT>/scripts/scan-codebase.py`):
 
    ```bash
-   uv run scripts/scan-codebase.py . --format json
+   uv run <POWER_ROOT>/scripts/scan-codebase.py . --format json
    ```
 
-   (Fall back to `python3 scripts/scan-codebase.py . --format json` or `python scripts/scan-codebase.py . --format json` if `uv` is not available.)
+   (Fall back to `python3 <POWER_ROOT>/scripts/scan-codebase.py . --format json` or `python <POWER_ROOT>/scripts/scan-codebase.py . --format json` if `uv` is not available.)
 
 2. Compare the scanner output against the frontmatter values:
    - Compare `total_files` from the scanner against the frontmatter `total_files`
