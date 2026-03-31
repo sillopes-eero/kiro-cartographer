@@ -4,7 +4,13 @@ Merge subagent reports into a unified codebase map, build architecture diagrams,
 
 ## Step 1: Merge Subagent Reports
 
-Collect all subagent reports from the Analyze phase. Each report contains one or more `## Module: <name>` sections with per-file analysis and module connections.
+Read all subagent reports from disk at `docs/.cartographer/reports/`. Each report file contains one or more `## Module: <name>` sections with per-file analysis and module connections.
+
+```bash
+ls docs/.cartographer/reports/
+```
+
+Read each `<id>.md` file. If any expected report files are missing (due to subagent failures in the Analyze phase), note the gaps — those modules will have incomplete coverage.
 
 ### 1a. Combine Module Sections
 

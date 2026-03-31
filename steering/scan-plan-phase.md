@@ -87,21 +87,21 @@ For each module, calculate the **module token total** by summing the `tokens` va
 
 ## Step 4: Balance Token Budgets
 
-Target **150,000 tokens per subagent**. Build subagent assignments using these rules:
+Target **80,000 tokens per subagent**. This conservative budget reduces the risk of subagent context overflow and crashes. Build subagent assignments using these rules:
 
 ### 4a. Split Large Modules
 
-If a single module's total tokens exceed 150,000:
+If a single module's total tokens exceed 80,000:
 
-- Split the module's files into sub-groups, each targeting ≤150,000 tokens.
+- Split the module's files into sub-groups, each targeting ≤80,000 tokens.
 - Keep files from the same subdirectory together when possible.
 - Each sub-group becomes a separate subagent assignment.
 
 ### 4b. Merge Small Modules
 
-If a module's total tokens are well below 150,000:
+If a module's total tokens are well below 80,000:
 
-- Combine it with other small modules into a single subagent assignment, as long as the combined total stays within the 150,000 token budget.
+- Combine it with other small modules into a single subagent assignment, as long as the combined total stays within the 80,000 token budget.
 - Prefer merging modules that are logically related (adjacent in the directory tree) when possible.
 
 ### 4c. Small Codebase Handling
@@ -124,7 +124,7 @@ Each subagent assignment should include:
 After building all assignments, verify:
 
 - Every non-skipped file from the scanner output appears in **exactly one** assignment.
-- No single assignment exceeds 150,000 estimated tokens.
+- No single assignment exceeds 80,000 estimated tokens.
 
 ## Step 5: Split_Mode Decision
 

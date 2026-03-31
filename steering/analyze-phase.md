@@ -1,6 +1,6 @@
 # Analyze Phase
 
-Spawn subagents in parallel to read and analyze the files assigned during the Plan phase. Each subagent receives a group of files and returns a structured markdown report.
+Two-pass analysis with disk-persisted reports for resilience. Subagent reports are written to `docs/.cartographer/reports/` so progress is never lost if a subagent crashes.
 
 ## Principles
 
@@ -8,17 +8,31 @@ Spawn subagents in parallel to read and analyze the files assigned during the Pl
 - All subagents for this phase are spawned **in a single turn** so they execute in parallel.
 - Do **not** specify a model name — Kiro handles model selection automatically.
 - Even for small codebases (under 100,000 tokens), at least one subagent must be used.
+- Each subagent **writes its report to disk** before returning. This ensures completed work survives if other subagents fail.
+- Skip locale/i18n files (e.g., files under `locales/`, `i18n/`, `translations/`, or `_locales/` directories, and files like `*.po`, `*.mo`, `*.xliff`). These contain repeated translated strings across languages and don't provide architectural insight.
 
-## Step 1: Build Subagent Prompts
+## Report Directory
 
-For each subagent assignment produced by the Plan phase, construct a prompt using the template below. Fill in the file list and module names from the assignment.
+Before spawning subagents, create the report directory:
 
-### Prompt Template
+```bash
+mkdir -p docs/.cartographer/reports
+```
+
+Each subagent writes its report to `docs/.cartographer/reports/<assignment_id>.md` (e.g., `docs/.cartographer/reports/1.md`, `docs/.cartographer/reports/2.md`).
+
+## Pass 1: Raw File Summaries (Lightweight)
+
+The first pass is intentionally lightweight — subagents read files and produce concise per-file summaries. This minimizes context pressure and reduces the chance of crashes.
+
+### Step 1a: Build Pass 1 Prompts
+
+For each subagent assignment, construct a prompt using this template:
 
 ```
-You are analyzing part of a codebase for documentation purposes. Read and analyze every file listed below.
+You are scanning part of a codebase to produce concise file summaries. Read every file listed below and write a brief summary for each.
 
-## Files to Analyze
+## Files to Scan
 
 <for each file in the assignment>
 - <file_path>
@@ -26,131 +40,161 @@ You are analyzing part of a codebase for documentation purposes. Read and analyz
 
 ## Instructions
 
-For **each file**, document the following:
+For **each file**, produce a concise but substantive summary:
 
-1. **Purpose**: A single-line description of what the file does.
-2. **Exports**: Key functions, classes, types, or constants exported by the file.
-3. **Imports**: Notable dependencies — both internal (other project files) and external (third-party packages).
-4. **Patterns**: Design patterns, conventions, or architectural choices used (e.g., factory pattern, middleware chain, singleton, observer).
-5. **Gotchas**: Non-obvious behavior, edge cases, implicit assumptions, or anything a developer new to this code should watch out for.
+- **Purpose**: One or two sentences describing what the file does and its role in the module.
+- **Exports**: Key functions, classes, types with brief descriptions (e.g., `createUser (async, takes UserInput, returns User), UserSchema (Zod validation)`).
+- **Imports**: Notable dependencies with brief context (e.g., `express (routing), ./db (database connection), ../utils/logger (structured logging)`).
+- **Patterns**: Design patterns with one-line explanation (e.g., `factory — creates service instances based on config`).
+- **Gotchas**: One or two sentences about non-obvious behavior, edge cases, or implicit assumptions. Write "None" if nothing stands out.
 
-After analyzing all files, also identify:
+Keep each file summary to **5–8 lines**. Be concise but capture enough detail that someone who hasn't read the source can understand what the file does and how it connects to others.
 
-- **Entry points**: Which files serve as entry points for this module (e.g., index files, main exports, route definitions).
-- **Data flow**: How data moves between the files — what calls what, what feeds into what.
-- **Configuration dependencies**: Any environment variables, config files, or external settings these files depend on.
+After all file summaries, add a brief Module Connections block:
 
-## Output Format
+- Entry points: <list of entry point files>
+- Key data flows: <one sentence>
+- Config dependencies: <list or "None">
 
-Return your analysis as structured markdown using exactly this format:
+## CRITICAL: Write Report to Disk
+
+After completing your analysis, you MUST write the full report to disk using the file write tool:
+
+**File path**: `docs/.cartographer/reports/<ASSIGNMENT_ID>.md`
+
+Write the report in this exact format:
 
 ## Module: <module_name>
 
 ### <file_path>
-- **Purpose**: <one-line description>
-- **Exports**: <key functions, classes, types>
-- **Imports**: <notable dependencies>
-- **Patterns**: <design patterns, conventions>
-- **Gotchas**: <non-obvious behavior, edge cases>
+- **Purpose**: <one or two sentences>
+- **Exports**: <names with brief descriptions>
+- **Imports**: <names with brief context>
+- **Patterns**: <pattern with one-line explanation>
+- **Gotchas**: <one or two sentences, or "None">
 
-(Repeat the above section for each file.)
+(Repeat for each file.)
 
 ### Module Connections
-- Entry points: <list of entry point files>
-- Data flow: <description of how data moves between files>
-- Configuration dependencies: <environment variables, config files, external settings>
+- Entry points: <list>
+- Key data flows: <one sentence>
+- Config dependencies: <list or "None">
 
-If the assignment covers multiple modules, include a separate `## Module: <name>` section for each one, each with its own file analyses and Module Connections block.
+Writing the file to disk is the most important step. Even if you cannot analyze every file, write what you have.
 ```
 
-### Filling in the Template
+### Step 1b: Spawn All Pass 1 Subagents
 
-- Replace `<file_path>` entries with the actual file paths from the assignment's `files` list.
-- Replace `<module_name>` with the top-level directory name(s) from the assignment's `directories` field. If the assignment covers multiple modules, instruct the subagent to group its output by module.
-- Do not add any model selection parameters to the invocation.
-- Skip locale/i18n files (e.g., files under `locales/`, `i18n/`, `translations/`, or `_locales/` directories, and files like `*.po`, `*.mo`, `*.xliff`). These contain repeated translated strings across languages and don't provide architectural insight.
-
-## Step 2: Spawn All Subagents in Parallel
-
-Use the `invokeSubAgent` tool to spawn every subagent **in a single turn**. This means all `invokeSubAgent` calls must appear in the same message so Kiro can execute them concurrently.
-
-For each assignment, invoke a subagent like this:
+Use `invokeSubAgent` to spawn every subagent **in a single turn**:
 
 ```
 invokeSubAgent(
   name: "general-task-execution",
-  prompt: "<filled-in prompt template from Step 1>",
-  explanation: "Analyze files for modules: <module names> (<estimated_tokens> tokens)",
+  prompt: "<filled-in Pass 1 prompt>",
+  explanation: "Pass 1: Scan files for modules: <module names> (<estimated_tokens> tokens), write report to docs/.cartographer/reports/<id>.md",
   contextFiles: [{"path": "<file_path>"}, {"path": "<file_path>"}, ...]
 )
 ```
 
 All four parameters are **required**:
 
-- `name`: Always `"general-task-execution"` — this gives the subagent access to file reading tools.
-- `prompt`: The fully filled-in template from Step 1.
-- `explanation`: A brief description of which modules and how many tokens the subagent covers. **This parameter is required and must not be omitted.**
-- `contextFiles`: An array of objects with `path` keys for each file the subagent should analyze. This ensures the subagent has access to the files. List every file from the assignment's `files` list.
+- `name`: Always `"general-task-execution"`.
+- `prompt`: The filled-in Pass 1 template with the assignment ID baked into the write path.
+- `explanation`: Brief description including the assignment ID and modules. **This parameter is required and must not be omitted.**
+- `contextFiles`: Array of `{"path": "<file>"}` objects for every file in the assignment.
 
-### Example
+### Step 1c: Verify Pass 1 Reports
 
-If the Plan phase produced three assignments:
+After all subagents return, check which report files were written to disk:
 
-| ID  | Modules                   | Files | Est. Tokens |
-| --- | ------------------------- | ----- | ----------- |
-| 1   | src/api, src/middleware   | 12    | 130,000     |
-| 2   | src/components, src/hooks | 18    | 145,000     |
-| 3   | lib, tests                | 9     | 85,000      |
+```bash
+ls docs/.cartographer/reports/
+```
 
-Then spawn three `invokeSubAgent` calls in a single turn — one per assignment. Each call uses the filled-in prompt template with that assignment's file list and module names.
+- For each assignment, verify `docs/.cartographer/reports/<id>.md` exists and is non-empty.
+- If a report is missing, that subagent failed. Record the failed assignment for retry.
 
-## Step 3: Collect Subagent Reports
+### Step 1d: Retry Failed Assignments
 
-After all subagents complete, gather their responses. Each subagent returns a markdown report following the format specified in the prompt template.
+If any reports are missing:
 
-### Expected Report Structure
+1. Re-spawn subagents **only for the failed assignments** using the same prompts.
+2. Check again after retry.
+3. If a subagent fails twice, log the gap and move on — the Synthesize phase will note incomplete coverage.
 
-Each report contains one or more module sections:
+## Pass 2: Cross-Cutting Analysis (Enrichment)
+
+The second pass reads the file summaries from disk and adds what individual subagents couldn't see: cross-file relationships, cross-module dependencies, and architectural narratives. It does **not** re-describe individual files — those summaries from Pass 1 are already substantive enough.
+
+### Step 2a: Read All Pass 1 Reports
+
+Read all report files from `docs/.cartographer/reports/`:
+
+```bash
+cat docs/.cartographer/reports/*.md
+```
+
+Or read each file individually. These are the per-file summaries from Pass 1.
+
+### Step 2b: Enrich Each Module
+
+For each module, **append** (do not replace) cross-cutting analysis:
+
+1. **Module narrative**: A paragraph describing the module's overall role in the system and how its files work together.
+2. **Internal data flow**: How data moves between files within the module (what calls what, shared state, event chains).
+3. **Cross-module dependencies**: What this module imports from other modules, and what other modules depend on it. Use the import/export info from Pass 1 to trace these connections.
+4. **Architectural patterns**: Patterns that span multiple files (e.g., a middleware chain, plugin system, layered architecture).
+5. **Module-level gotchas**: Aggregate warnings that emerge from combining individual file gotchas.
+
+### Step 2c: Write Enriched Reports
+
+Overwrite each report file, preserving the original per-file summaries and adding the cross-cutting sections:
+
+**File path**: `docs/.cartographer/reports/<assignment_id>.md`
 
 ```markdown
 ## Module: <module_name>
 
 ### <file_path>
 
-- **Purpose**: <one-line description>
-- **Exports**: <key functions, classes, types>
-- **Imports**: <notable dependencies>
-- **Patterns**: <design patterns, conventions>
-- **Gotchas**: <non-obvious behavior, edge cases>
+- **Purpose**: <one or two sentences — preserved from Pass 1>
+- **Exports**: <names with brief descriptions — preserved from Pass 1>
+- **Imports**: <names with brief context — preserved from Pass 1>
+- **Patterns**: <pattern with one-line explanation — preserved from Pass 1>
+- **Gotchas**: <one or two sentences — preserved from Pass 1>
+
+(Repeat for each file — keep Pass 1 content as-is.)
+
+### Module Narrative
+
+<Paragraph describing the module's role and how its files collaborate.>
 
 ### Module Connections
 
-- Entry points: <list>
-- Data flow: <description>
-- Configuration dependencies: <list>
+- Entry points: <list of entry point files with descriptions>
+- Internal data flow: <how data moves between files within this module>
+- Cross-module dependencies: <what this module imports from / exports to other modules>
+- Configuration dependencies: <environment variables, config files, external settings>
+
+### Module-Level Gotchas
+
+<Warnings that emerge from the combination of individual file behaviors.>
 ```
-
-### Validation
-
-For each subagent report, verify:
-
-- Every file from the assignment appears in the report with all five analysis fields (Purpose, Exports, Imports, Patterns, Gotchas).
-- A Module Connections section is present for each module covered.
-- The report uses the expected markdown structure.
-
-If a subagent's report is missing files or sections, note the gaps — the Synthesize phase will need to account for incomplete coverage.
 
 ## Error Handling
 
-- **Subagent fails to return a report**: Record which assignment (ID, modules, files) failed. Report the failure to the user and suggest re-running the mapping for the affected modules.
-- **Subagent returns partial analysis**: Proceed with what was returned. Flag the missing files in the synthesis phase so the user is aware of gaps.
+- **Subagent fails to write report to disk**: The subagent may have returned output in its response even if the file write failed. Check the subagent's response text and manually write it to disk if present.
+- **Subagent fails entirely**: Record which assignment failed. Retry once. If it fails again, proceed with available reports and flag the gap.
 - **All subagents fail**: Do not proceed to the Synthesize phase. Report the failure to the user and suggest checking file accessibility and permissions.
+- **Partial report on disk**: If a report file exists but is incomplete (subagent crashed mid-write), keep what's there and flag the incomplete files for the user.
 
 ## Output
 
-At the end of this phase, you should have:
+At the end of this phase:
 
-1. **Subagent reports**: One structured markdown report per assignment, covering all analyzed files.
-2. **Coverage gaps** (if any): A list of files or modules that were not successfully analyzed.
+1. **Report files on disk**: `docs/.cartographer/reports/<id>.md` for each assignment, containing enriched per-file analysis.
+2. **Coverage gaps** (if any): A list of assignments that failed both attempts.
 
-Proceed to the Synthesize & Write phase with these reports.
+The Synthesize & Write phase reads reports from `docs/.cartographer/reports/` rather than from agent context. This means the orchestrator's context stays clean and the reports survive across sessions.
+
+Proceed to the Synthesize & Write phase.

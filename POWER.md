@@ -1,8 +1,8 @@
 ---
 name: cartographer
 description: "Maps and documents codebases of any size by orchestrating parallel subagents"
-author: "Bootoshi"
-version: "1.0.0"
+author: "Bootoshi, sillopes-eero"
+version: "2.0.0"
 triggers:
   - "map this codebase"
   - "cartographer"
@@ -32,15 +32,17 @@ Cartographer uses a phased approach where the orchestrating agent plans the work
 
    Fallbacks: `python3 <POWER_ROOT>/scripts/scan-codebase.py . --format json` or `python <POWER_ROOT>/scripts/scan-codebase.py . --format json`
 
-3. **Plan** — Analyze scan output and group files into subagent assignments. Balance token budgets at ~150,000 tokens per subagent. If more than 5 top-level modules are detected, prompt the user about Split_Mode.
+3. **Plan** — Analyze scan output and group files into subagent assignments. Balance token budgets at ~80,000 tokens per subagent (conservative to prevent context overflow). If more than 5 top-level modules are detected, prompt the user about Split_Mode.
    → See [steering/scan-plan-phase.md](steering/scan-plan-phase.md)
 
-4. **Analyze** — Spawn subagents in parallel (all in a single turn) using `invokeSubAgent`. Each subagent reads its assigned files and returns structured analysis covering purpose, exports, imports, patterns, and gotchas.
+4. **Analyze (Pass 1)** — Spawn subagents in parallel. Each reads its assigned files and writes a concise raw summary to `docs/.cartographer/reports/<id>.md`. Reports are persisted to disk so progress survives subagent crashes. Failed subagents are retried automatically.
+
+5. **Analyze (Pass 2)** — Read the raw summaries from disk and enrich them with cross-file relationships, architectural insights, and detailed module narratives. Enriched reports overwrite the raw ones on disk.
    → See [steering/analyze-phase.md](steering/analyze-phase.md)
 
-5. **Synthesize** — Merge all subagent reports, deduplicate overlapping analysis, identify cross-cutting concerns, and build Mermaid architecture diagrams.
+6. **Synthesize** — Read enriched reports from `docs/.cartographer/reports/`, merge them, deduplicate overlapping analysis, identify cross-cutting concerns, and build Mermaid architecture diagrams.
 
-6. **Write** — Create or update `docs/CODEBASE_MAP.md` with full frontmatter and all required sections. In Split_Mode, write per-module files under `docs/codebase_map_modules/`. In update mode, only refresh affected module sections.
+7. **Write** — Create or update `docs/CODEBASE_MAP.md` with full frontmatter and all required sections. In Split_Mode, write per-module files under `docs/codebase_map_modules/`. In update mode, only refresh affected module sections.
    → See [steering/synthesize-write-phase.md](steering/synthesize-write-phase.md)
 
 ## Scanner Script
