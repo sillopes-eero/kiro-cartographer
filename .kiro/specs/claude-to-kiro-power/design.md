@@ -138,18 +138,72 @@ All paths are relative to the Power root directory. No `CLAUDE_PLUGIN_ROOT` vari
 
 ### 4. Subagent Interface
 
-The orchestrating agent spawns subagents via `invokeSubAgent`. Each subagent receives:
+The orchestrating agent spawns subagents via `invokeSubAgent`. Each subagent writes its analysis incrementally to a shared report file, processing one file at a time.
+
+**Workflow:**
+
+1. **Orchestrator creates report files** before spawning subagents. Each report file is pre-populated with a checklist of files the subagent must analyze:
+
+```markdown
+# Report: Subagent 1
+
+## Progress
+
+- [ ] src/api/routes.ts
+- [ ] src/api/middleware/auth.ts
+- [ ] src/api/middleware/rateLimit.ts
+
+## Analysis
+```
+
+2. **Subagent processes files one by one.** For each file, the subagent:
+   - Reads the file
+   - Appends its analysis to the report file using `fsAppend`
+   - Marks the file as completed by updating the checkbox from `[ ]` to `[x]` using `strReplace`
+
+3. **Report file after partial progress** looks like:
+
+```markdown
+# Report: Subagent 1
+
+## Progress
+
+- [x] src/api/routes.ts
+- [x] src/api/middleware/auth.ts
+- [ ] src/api/middleware/rateLimit.ts
+
+## Analysis
+
+### src/api/routes.ts
+
+- **Purpose**: Defines API route handlers
+- **Exports**: router
+- **Imports**: express, authMiddleware
+- **Patterns**: RESTful routing
+- **Gotchas**: Rate limiting applied per-route
+
+### src/api/middleware/auth.ts
+
+- **Purpose**: JWT authentication middleware
+- **Exports**: authMiddleware
+- **Imports**: jsonwebtoken, config
+- **Patterns**: Express middleware pattern
+- **Gotchas**: Token refresh not handled here
+```
 
 **Input (via prompt):**
 
-- List of file paths to read and analyze
-- Instructions to document: purpose, exports, imports, patterns, gotchas per file
+- Path to the report file the subagent must write to
+- Instructions to process files one at a time: read → append analysis → mark checkbox complete
+- Instructions to document per file: purpose, exports, imports, patterns, gotchas
 - Instructions to identify cross-file connections, entry points, data flow
+- After all files are processed, append a Module Connections summary section
 
-**Output (returned to orchestrator):**
+**Output (written to report file, not returned):**
 
-- Structured markdown with per-file analysis sections
-- Module-level summary of connections and patterns
+- Structured markdown appended incrementally to the report file
+- Each file's checkbox marked `[x]` as it completes
+- Module-level summary of connections and patterns appended at the end
 
 **Constraints:**
 
@@ -157,12 +211,17 @@ The orchestrating agent spawns subagents via `invokeSubAgent`. Each subagent rec
 - All subagents for a phase are spawned in a single turn (parallel execution)
 - No model name specified (Kiro handles model selection)
 - Even small codebases (<100k tokens) use at least one subagent for file reading
+- Subagents use `fsAppend` for appending analysis and `strReplace` for marking checkboxes — this keeps each write small and avoids the large-file limitations of `fsWrite`
 
 ### 5. File Writing Strategy
 
-The generated output files (CODEBASE_MAP.md and per-module files) can be large. The `fsWrite` and `fsAppend` tools are slow and have line-count limitations that make them unsuitable for writing large markdown documents.
+**Subagent report files (analyze phase):** Subagents write incrementally using `fsAppend` (small appends per file) and `strReplace` (checkbox updates). This works well because each append is small — just one file's analysis at a time.
 
-**Preferred approach: Python inline script via `executeBash`**
+**Final output files (synthesize-write phase):** The orchestrator writes `docs/CODEBASE_MAP.md` and per-module files. These can be large, so the preferred approach is:
+
+1. Python `pathlib.Path.write_text()` via `executeBash` — handles special characters, no escaping issues
+2. Bash `cat` with heredoc via `executeBash` — fallback if Python is unavailable
+3. `fsWrite`/`fsAppend` — last resort only, for very small files or chunks (<50 lines)
 
 ```bash
 python3 -c "
@@ -172,21 +231,7 @@ pathlib.Path('docs/CODEBASE_MAP.md').write_text(content)
 "
 ```
 
-**Fallback: bash heredoc via `executeBash`**
-
-```bash
-cat > docs/CODEBASE_MAP.md << 'CARTOGRAPHER_EOF'
-<markdown content here>
-CARTOGRAPHER_EOF
-```
-
-**Order of preference:**
-
-1. Python `pathlib.Path.write_text()` via `executeBash` — handles special characters, no escaping issues
-2. Bash `cat` with heredoc via `executeBash` — fallback if Python is unavailable
-3. `fsWrite`/`fsAppend` — last resort only, for very small files
-
-The steering files must instruct the agent to use this strategy for all output file writing. The `fsWrite`/`fsAppend` tools should only be used for files under ~50 lines.
+The steering files must instruct both the orchestrator and subagents to follow these strategies for their respective writing tasks.
 
 ### 6. Output Files
 
@@ -335,12 +380,34 @@ The orchestrator builds assignments by:
 
 ### Subagent Report Model
 
-Each subagent returns a markdown report with this structure:
+Each subagent writes incrementally to a report file. The orchestrator pre-creates the file with this structure:
 
 ```markdown
-## Module: <module_name>
+# Report: Subagent <id>
 
-### <file_path>
+## Progress
+
+- [ ] <file_path_1>
+- [ ] <file_path_2>
+- [ ] <file_path_N>
+
+## Analysis
+```
+
+As the subagent processes each file, it appends analysis and marks the checkbox:
+
+```markdown
+# Report: Subagent 1
+
+## Progress
+
+- [x] src/api/routes.ts
+- [x] src/api/middleware/auth.ts
+- [ ] src/api/middleware/rateLimit.ts
+
+## Analysis
+
+### src/api/routes.ts
 
 - **Purpose**: <one-line description>
 - **Exports**: <key functions, classes, types>
@@ -348,6 +415,18 @@ Each subagent returns a markdown report with this structure:
 - **Patterns**: <design patterns, conventions>
 - **Gotchas**: <non-obvious behavior, edge cases>
 
+### src/api/middleware/auth.ts
+
+- **Purpose**: <one-line description>
+- **Exports**: <key functions, classes, types>
+- **Imports**: <notable dependencies>
+- **Patterns**: <design patterns, conventions>
+- **Gotchas**: <non-obvious behavior, edge cases>
+```
+
+After all files are processed, the subagent appends a Module Connections section:
+
+```markdown
 ### Module Connections
 
 - Entry points: <list>

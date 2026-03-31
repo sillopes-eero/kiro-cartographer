@@ -63,9 +63,10 @@ Convert the Cartographer Claude Code plugin into a Kiro Power by creating the Po
 
 - [x] 4. Create analyze-phase steering file
   - [x] 4.1 Create `cartographer-power/steering/analyze-phase.md`
+    - Orchestrator pre-creates report files with file checklists before spawning subagents
     - Subagent prompt template using `invokeSubAgent` (not Claude Task tool)
-    - Instructions for each subagent: read assigned files, document purpose, exports, imports, patterns, gotchas
-    - Structured markdown output format for subagent reports
+    - Instructions for each subagent: process files one by one — read file, append analysis via `fsAppend`, mark checkbox `[x]` via `strReplace`
+    - Structured markdown output format appended incrementally to report files
     - Spawn all subagents in a single turn for parallel execution
     - No model name specification (Kiro handles model selection)
     - _Requirements: 3.1, 3.2, 3.3, 4.6_
@@ -81,9 +82,9 @@ Convert the Cartographer Claude Code plugin into a Kiro Power by creating the Po
 
 - [x] 6. Create synthesize-write-phase steering file
   - [x] 6.1 Create `cartographer-power/steering/synthesize-write-phase.md`
-    - Synthesis instructions: merge subagent reports, deduplicate, identify cross-cutting concerns, build Mermaid diagrams
+    - Synthesis instructions: read subagent report files, verify all checkboxes are `[x]`, merge analysis sections, deduplicate, identify cross-cutting concerns, build Mermaid diagrams
     - Writing instructions for CODEBASE_MAP.md with full frontmatter (last_mapped_commit, last_mapped, total_files, total_tokens, split_mode)
-    - File writing strategy: use Python `pathlib.Path.write_text()` via `executeBash` as primary method, bash heredoc as fallback, `fsWrite`/`fsAppend` only for files under ~50 lines
+    - File writing strategy for final output: use Python `pathlib.Path.write_text()` via `executeBash` as primary method, bash heredoc as fallback, `fsWrite`/`fsAppend` only for files under ~50 lines
     - Required sections: System Overview, Directory Structure, Module Guide, Data Flow, Conventions, Gotchas, Navigation Guide
     - Split_Mode output: summary in index with links to per-module files under docs/codebase_map_modules/
     - Non-Split_Mode: full detailed analysis inline
