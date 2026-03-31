@@ -28,15 +28,6 @@ Execute the scanner to produce a JSON inventory of the **user's project** (curre
 
 The `.` argument scans the user's current working directory. The script path must resolve to the Power's installation directory, not the user's project.
 
-### Locale / i18n Files
-
-Locale and internationalization files (e.g., `locales/`, `i18n/`, `translations/`, `*.po`, `*.mo`, `*.xliff`, `messages.json` under `_locales/`) contain repeated strings across languages and add significant token count without meaningful architectural insight. When planning subagent assignments:
-
-- Exclude locale/i18n files from subagent assignments by default.
-- Do not count their tokens toward module budgets.
-- List them as skipped in the scanner results summary shown to the user.
-- If the user explicitly asks to include them, respect that preference.
-
 ### Error Handling
 
 - **tiktoken not installed**: If the scanner exits with an error mentioning "tiktoken", suggest the user install it with `pip install tiktoken`, or use the `uv run` invocation which handles installation automatically.
@@ -68,69 +59,73 @@ Parse the JSON output and extract:
 - The `total_tokens` and `total_files` counts — these go into the final CODEBASE_MAP.md frontmatter.
 - The `skipped` array — log any skipped files for the user's awareness but do not assign them to subagents.
 
-## Step 3: Group Files by Module
+## Step 3: Plan Subagent Assignments
 
-Group the files from the scanner output by their **top-level directory** (the first path segment). Each top-level directory represents a module.
+Run the assignment planner script to deterministically split files into subagent groups. The planner respects both token budget and file count limits.
 
-For example, given these file paths:
+Pipe the scanner output directly into the planner:
 
-```
-src/index.ts          → module: src
-src/utils/helpers.ts  → module: src
-lib/parser.ts         → module: lib
-docs/README.md        → module: docs
+```bash
+uv run <POWER_ROOT>/scripts/scan-codebase.py . --format json | uv run <POWER_ROOT>/scripts/plan-assignments.py - --output-reports docs/.cartographer/reports
 ```
 
-Files at the repository root (no directory prefix) are grouped into a virtual `<root>` module.
+Or if you saved the scanner output to a file:
 
-For each module, calculate the **module token total** by summing the `tokens` value of all files in that module.
+```bash
+uv run <POWER_ROOT>/scripts/plan-assignments.py scanner-output.json --output-reports docs/.cartographer/reports
+```
 
-## Step 4: Balance Token Budgets
+Fallbacks follow the same pattern as the scanner (try `python3`, then `python`).
 
-Target **80,000 tokens per subagent** and a maximum of **40 files per subagent**. Whichever limit is hit first triggers a split. This conservative budget reduces the risk of subagent context overflow and crashes. Build subagent assignments using these rules:
+### Planner Options
 
-### 4a. Split Large Modules
+| Flag               | Default | Description                                         |
+| ------------------ | ------- | --------------------------------------------------- |
+| `--max-tokens`     | 80000   | Max tokens per subagent assignment                  |
+| `--max-files`      | 40      | Max files per subagent assignment                   |
+| `--include-locale` | off     | Include locale/i18n files (excluded by default)     |
+| `--output-reports` | off     | Create report skeleton files in the given directory |
 
-If a single module's total tokens exceed 80,000 **or** its file count exceeds 40:
+### Planner Output
 
-- Split the module's files into sub-groups, each targeting ≤80,000 tokens **and** ≤40 files.
-- Keep files from the same subdirectory together when possible.
-- Each sub-group becomes a separate subagent assignment.
+The planner outputs JSON with this structure:
 
-### 4b. Merge Small Modules
+```json
+{
+  "assignments": [
+    {
+      "id": 1,
+      "modules": ["src"],
+      "files": ["src/index.ts", "src/app.ts"],
+      "file_count": 2,
+      "estimated_tokens": 5400
+    }
+  ],
+  "excluded": ["locales/en.json", "locales/fr.json"],
+  "summary": "3 assignments, 45 files, 72,000 tokens, 2 locale files excluded",
+  "config": {
+    "max_tokens": 80000,
+    "max_files": 40,
+    "exclude_locale": true
+  }
+}
+```
 
-If a module's total tokens are well below 80,000 and its file count is well below 40:
+Parse this JSON and use the `assignments` array directly — each entry is a ready-to-use subagent assignment. Do **not** re-plan or rebalance the assignments; the script output is deterministic and final.
 
-- Combine it with other small modules into a single subagent assignment, as long as the combined total stays within the 80,000 token budget **and** 40 file limit.
-- Prefer merging modules that are logically related (adjacent in the directory tree) when possible.
+### How the Planner Works
 
-### 4c. Small Codebase Handling
+The planner uses a deterministic algorithm:
 
-Even if the entire codebase is under 100,000 tokens, **always create at least one subagent assignment**. The orchestrating agent must never read codebase files directly — file reading is always delegated to subagents.
+1. Excludes locale/i18n files by default.
+2. Groups files by top-level directory (module).
+3. Splits any module that exceeds 80k tokens or 40 files into sub-groups.
+4. Merges small modules together (greedy, in sorted order) as long as both limits hold.
+5. Guarantees at least one assignment even for tiny codebases.
 
-### 4d. Assignment Structure
+## Step 4: Split_Mode Decision
 
-Each subagent assignment should include:
-
-| Field              | Description                                    |
-| ------------------ | ---------------------------------------------- |
-| `id`               | Sequential subagent number (1, 2, 3, …)        |
-| `files`            | List of file paths to read and analyze         |
-| `directories`      | Top-level modules covered by this assignment   |
-| `estimated_tokens` | Sum of token counts for all files in the group |
-| `file_count`       | Number of files in the group                   |
-
-### Validation
-
-After building all assignments, verify:
-
-- Every non-skipped file from the scanner output appears in **exactly one** assignment.
-- No single assignment exceeds 80,000 estimated tokens.
-- No single assignment exceeds 40 files.
-
-## Step 5: Split_Mode Decision
-
-Count the number of distinct top-level modules (directories) identified in Step 3.
+Count the number of distinct top-level modules from the planner output (unique values across all assignment `modules` arrays).
 
 - **If more than 5 top-level modules are detected**: Prompt the user to choose whether to enable Split_Mode.
 
@@ -145,7 +140,7 @@ Count the number of distinct top-level modules (directories) identified in Step 
 
 Record the Split_Mode decision for use in the Synthesize & Write phase.
 
-## Step 6: Update Mode Filtering
+## Step 5: Update Mode Filtering
 
 If the workflow is running in **Update Mode** (set during the Check phase):
 

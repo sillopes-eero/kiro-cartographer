@@ -13,13 +13,19 @@ Two-pass analysis with disk-persisted reports for resilience. Subagent reports a
 
 ## Report Directory
 
-Before spawning subagents, create the report directory:
+The planner script (run during the Scan & Plan phase with `--output-reports`) has already created report skeleton files at `docs/.cartographer/reports/<id>.md`. Each skeleton contains:
+
+- A file checklist with checkboxes for tracking progress
+- Pre-filled module headers and file path sections
+- Empty fields for the subagent to fill in (Purpose, Exports, Imports, Patterns, Gotchas)
+
+Verify the skeletons exist:
 
 ```bash
-mkdir -p docs/.cartographer/reports
+ls docs/.cartographer/reports/
 ```
 
-Each subagent writes its report to `docs/.cartographer/reports/<assignment_id>.md` (e.g., `docs/.cartographer/reports/1.md`, `docs/.cartographer/reports/2.md`).
+The subagent's job is to read the assigned files, then **overwrite** its report skeleton with the completed analysis and "check" the file checkbox.
 
 ## Pass 1: Raw File Summaries (Lightweight)
 
