@@ -158,7 +158,37 @@ The orchestrating agent spawns subagents via `invokeSubAgent`. Each subagent rec
 - No model name specified (Kiro handles model selection)
 - Even small codebases (<100k tokens) use at least one subagent for file reading
 
-### 5. Output Files
+### 5. File Writing Strategy
+
+The generated output files (CODEBASE_MAP.md and per-module files) can be large. The `fsWrite` and `fsAppend` tools are slow and have line-count limitations that make them unsuitable for writing large markdown documents.
+
+**Preferred approach: Python inline script via `executeBash`**
+
+```bash
+python3 -c "
+import pathlib
+content = '''<markdown content here>'''
+pathlib.Path('docs/CODEBASE_MAP.md').write_text(content)
+"
+```
+
+**Fallback: bash heredoc via `executeBash`**
+
+```bash
+cat > docs/CODEBASE_MAP.md << 'CARTOGRAPHER_EOF'
+<markdown content here>
+CARTOGRAPHER_EOF
+```
+
+**Order of preference:**
+
+1. Python `pathlib.Path.write_text()` via `executeBash` — handles special characters, no escaping issues
+2. Bash `cat` with heredoc via `executeBash` — fallback if Python is unavailable
+3. `fsWrite`/`fsAppend` — last resort only, for very small files
+
+The steering files must instruct the agent to use this strategy for all output file writing. The `fsWrite`/`fsAppend` tools should only be used for files under ~50 lines.
+
+### 6. Output Files
 
 #### docs/CODEBASE_MAP.md (always generated)
 
@@ -190,7 +220,7 @@ split_mode: <boolean>
 
 One file per top-level module (e.g., `api.md`, `components.md`). Contains the detailed analysis that would otherwise be inline in CODEBASE_MAP.md. The index file links to these with relative paths.
 
-### 6. Change Detection Interface
+### 7. Change Detection Interface
 
 Used in the Check phase to determine if an update is needed:
 

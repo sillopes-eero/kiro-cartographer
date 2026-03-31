@@ -83,6 +83,7 @@ Convert the Cartographer Claude Code plugin into a Kiro Power by creating the Po
   - [x] 6.1 Create `cartographer-power/steering/synthesize-write-phase.md`
     - Synthesis instructions: merge subagent reports, deduplicate, identify cross-cutting concerns, build Mermaid diagrams
     - Writing instructions for CODEBASE_MAP.md with full frontmatter (last_mapped_commit, last_mapped, total_files, total_tokens, split_mode)
+    - File writing strategy: use Python `pathlib.Path.write_text()` via `executeBash` as primary method, bash heredoc as fallback, `fsWrite`/`fsAppend` only for files under ~50 lines
     - Required sections: System Overview, Directory Structure, Module Guide, Data Flow, Conventions, Gotchas, Navigation Guide
     - Split_Mode output: summary in index with links to per-module files under docs/codebase_map_modules/
     - Non-Split_Mode: full detailed analysis inline
