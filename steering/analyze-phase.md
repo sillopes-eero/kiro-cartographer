@@ -31,102 +31,48 @@ The subagent's job is to read the assigned files, then **overwrite** its report 
 
 The first pass is intentionally lightweight — subagents read files and produce concise per-file summaries. This minimizes context pressure and reduces the chance of crashes.
 
-### Step 1a: Build Pass 1 Prompts
+### Step 1a: Subagent Commands Are Pre-Generated
 
-For each subagent assignment, construct a prompt using this template:
+The planner script has already generated the exact `invokeSubAgent` parameters for each assignment in the `subagent_commands` array of its JSON output. Each entry contains:
 
-```
-You are scanning part of a codebase to produce concise file summaries. Read every file listed below and write a brief summary for each.
+- `name`: The subagent name (`"general-task-execution"`)
+- `prompt`: The complete prompt with file list, instructions, and report path
+- `explanation`: Description of the assignment (required, do not omit)
+- `contextFiles`: Array with the report skeleton file first, then all source files
 
-## Files to Scan
-
-<for each file in the assignment>
-- <file_path>
-</for each>
-
-## Instructions
-
-For **each file**, produce a concise but substantive summary:
-
-- **Purpose**: One or two sentences describing what the file does and its role in the module.
-- **Exports**: Key functions, classes, types with brief descriptions (e.g., `createUser (async, takes UserInput, returns User), UserSchema (Zod validation)`).
-- **Imports**: Notable dependencies with brief context (e.g., `express (routing), ./db (database connection), ../utils/logger (structured logging)`).
-- **Patterns**: Design patterns with one-line explanation (e.g., `factory — creates service instances based on config`).
-- **Gotchas**: One or two sentences about non-obvious behavior, edge cases, or implicit assumptions. Write "None" if nothing stands out.
-
-Keep each file summary to **5–8 lines**. Be concise but capture enough detail that someone who hasn't read the source can understand what the file does and how it connects to others.
-
-After all file summaries, add a brief Module Connections block:
-
-- Entry points: <list of entry point files>
-- Key data flows: <one sentence>
-- Config dependencies: <list or "None">
-
-## CRITICAL: Write Report to Disk
-
-After completing your analysis, you MUST write the full report to disk using the file write tool:
-
-**File path**: `docs/.cartographer/reports/<ASSIGNMENT_ID>.md`
-
-Write the report in this exact format:
-
-## Module: <module_name>
-
-### <file_path>
-- **Purpose**: <one or two sentences>
-- **Exports**: <names with brief descriptions>
-- **Imports**: <names with brief context>
-- **Patterns**: <pattern with one-line explanation>
-- **Gotchas**: <one or two sentences, or "None">
-
-(Repeat for each file.)
-
-### Module Connections
-- Entry points: <list>
-- Key data flows: <one sentence>
-- Config dependencies: <list or "None">
-
-Writing the file to disk is the most important step. Even if you cannot analyze every file, write what you have.
-```
+**Do not modify these commands.** Use them exactly as provided.
 
 ### Step 1b: Spawn All Pass 1 Subagents
 
-Use `invokeSubAgent` to spawn every subagent **in a single turn**:
+Invoke `invokeSubAgent` once for each entry in `subagent_commands`, **all in a single turn** for parallel execution. Copy the parameters directly from the planner output:
 
 ```
 invokeSubAgent(
-  name: "general-task-execution",
-  prompt: "<filled-in Pass 1 prompt>",
-  explanation: "Pass 1: Scan files for modules: <module names> (<estimated_tokens> tokens), write report to docs/.cartographer/reports/<id>.md",
-  contextFiles: [{"path": "<file_path>"}, {"path": "<file_path>"}, ...]
+  name: <subagent_commands[i].name>,
+  prompt: <subagent_commands[i].prompt>,
+  explanation: <subagent_commands[i].explanation>,
+  contextFiles: <subagent_commands[i].contextFiles>
 )
 ```
 
-All four parameters are **required**:
-
-- `name`: Always `"general-task-execution"`.
-- `prompt`: The filled-in Pass 1 template with the assignment ID baked into the write path.
-- `explanation`: Brief description including the assignment ID and modules. **This parameter is required and must not be omitted.**
-- `contextFiles`: Array of `{"path": "<file>"}` objects for every file in the assignment.
-
 ### Step 1c: Verify Pass 1 Reports
 
-After all subagents return, check which report files were written to disk:
+After all subagents return, check which reports were completed by looking for unchecked files:
 
 ```bash
-ls docs/.cartographer/reports/
+grep -l "\- \[ \]" docs/.cartographer/reports/*.md
 ```
 
-- For each assignment, verify `docs/.cartographer/reports/<id>.md` exists and is non-empty.
-- If a report is missing, that subagent failed. Record the failed assignment for retry.
+- If a report has **no unchecked boxes**, that assignment completed successfully.
+- If a report still has unchecked boxes (`- [ ]`), the subagent died before finishing. Record the remaining files for retry.
 
-### Step 1d: Retry Failed Assignments
+### Step 1d: Retry Failed/Incomplete Assignments
 
-If any reports are missing:
+If any reports have unchecked files:
 
-1. Re-spawn subagents **only for the failed assignments** using the same prompts.
+1. Re-spawn subagents **only for the incomplete reports** using the same prompt. The subagent will see the checked boxes and skip to the first unchecked file.
 2. Check again after retry.
-3. If a subagent fails twice, log the gap and move on — the Synthesize phase will note incomplete coverage.
+3. If a subagent fails twice on the same file, log the gap and move on — the Synthesize phase will note incomplete coverage.
 
 ## Pass 2: Cross-Cutting Analysis (Enrichment)
 

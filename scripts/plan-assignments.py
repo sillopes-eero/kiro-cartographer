@@ -281,6 +281,83 @@ def generate_report_skeletons(plan_result: dict, output_dir: str = "docs/.cartog
     return created
 
 
+def build_subagent_prompt(assignment: dict, report_dir: str) -> str:
+    """Build the exact prompt string for a subagent."""
+    aid = assignment["id"]
+    modules = assignment["modules"]
+    files = assignment["files"]
+    report_path = f"{report_dir}/{aid}.md"
+
+    file_list = "\n".join(f"- {fp}" for fp in files)
+
+    return f"""You are scanning part of a codebase to produce concise file summaries.
+
+A report skeleton already exists at `{report_path}` with a file checklist and empty sections for each file.
+
+## CRITICAL: Work One File at a Time
+
+Process files **one at a time** using this loop:
+
+1. Read the next unchecked file from the checklist
+2. Analyze it (5–8 lines total)
+3. Use strReplace to fill in that file's empty section in the report
+4. Use strReplace to check off that file's checkbox: replace `- [ ]` with `- [x]`
+5. Move to the next unchecked file
+
+DO NOT try to write the entire report at once. Each file gets its own small write immediately after reading it.
+
+## Files to Analyze (in order)
+
+{file_list}
+
+## Per-File Analysis Format
+
+For each file, fill in the empty fields in the report skeleton:
+
+- **Purpose**: One or two sentences describing what the file does and its role in the module.
+- **Exports**: Key functions, classes, types with brief descriptions (e.g., `createUser (async, takes UserInput, returns User)`).
+- **Imports**: Notable dependencies with brief context (e.g., `express (routing), ./db (database connection)`).
+- **Patterns**: Design patterns with one-line explanation (e.g., `factory — creates service instances based on config`). Write "—" if none.
+- **Gotchas**: One or two sentences about non-obvious behavior. Write "None" if nothing stands out.
+
+## After All Files
+
+Once every file checkbox is checked, fill in the Module Connections section at the bottom:
+
+- Entry points: <list of entry point files>
+- Key data flows: <one sentence>
+- Config dependencies: <list or "None">"""
+
+
+def generate_subagent_commands(plan_result: dict, report_dir: str = "docs/.cartographer/reports") -> list[dict]:
+    """
+    Generate the exact invokeSubAgent call parameters for each assignment.
+
+    Returns a list of dicts, each with: name, prompt, explanation, contextFiles.
+    """
+    commands = []
+    for assignment in plan_result["assignments"]:
+        aid = assignment["id"]
+        modules = assignment["modules"]
+        files = assignment["files"]
+        tokens = assignment["estimated_tokens"]
+        report_path = f"{report_dir}/{aid}.md"
+
+        prompt = build_subagent_prompt(assignment, report_dir)
+
+        context_files = [{"path": report_path}]
+        context_files.extend({"path": fp} for fp in files)
+
+        commands.append({
+            "name": "general-task-execution",
+            "prompt": prompt,
+            "explanation": f"Pass 1: Analyze {len(files)} files for modules: {', '.join(modules)} ({tokens:,} tokens), fill report at {report_path}",
+            "contextFiles": context_files,
+        })
+
+    return commands
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plan subagent assignments from scanner output"
@@ -333,6 +410,9 @@ def main():
     if args.output_reports:
         created = generate_report_skeletons(result, args.output_reports)
         result["report_files"] = created
+        result["subagent_commands"] = generate_subagent_commands(result, args.output_reports)
+    else:
+        result["subagent_commands"] = generate_subagent_commands(result)
 
     print(json.dumps(result, indent=2))
 

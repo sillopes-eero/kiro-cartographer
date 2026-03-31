@@ -2,7 +2,7 @@
 name: cartographer
 description: "Maps and documents codebases of any size by orchestrating parallel subagents"
 author: "Bootoshi, sillopes-eero"
-version: "2.1.0"
+version: "2.2.0"
 triggers:
   - "map this codebase"
   - "cartographer"
