@@ -358,6 +358,116 @@ def generate_subagent_commands(plan_result: dict, report_dir: str = "docs/.carto
     return commands
 
 
+def build_update_prompt(changed_files: list[str], report_path: str) -> str:
+    """Build a prompt for re-analyzing specific files within an existing report."""
+    file_list = "\n".join(f"- {fp}" for fp in changed_files)
+
+    return f"""You are updating an existing codebase analysis report. Some files have changed and their sections need to be refreshed.
+
+The report is at `{report_path}`. It already contains analysis for many files. You are ONLY updating the sections for the changed files listed below. Do NOT touch any other file sections.
+
+## Changed Files to Re-Analyze
+
+{file_list}
+
+## CRITICAL: Work One File at a Time
+
+For each changed file:
+
+1. Read the file to understand its current state
+2. Use strReplace to update that file's section in the report — replace the OLD Purpose, Exports, Imports, Patterns, and Gotchas with fresh analysis based on the current file content
+3. Move to the next changed file
+
+DO NOT rewrite the entire report. Only replace the specific sections for the files listed above.
+
+## Per-File Analysis Format
+
+For each changed file, replace its existing fields with updated analysis:
+
+- **Purpose**: One or two sentences describing what the file does and its role in the module.
+- **Exports**: Key functions, classes, types with brief descriptions (e.g., `createUser (async, takes UserInput, returns User)`).
+- **Imports**: Notable dependencies with brief context (e.g., `express (routing), ./db (database connection)`).
+- **Patterns**: Design patterns with one-line explanation. Write "—" if none.
+- **Gotchas**: One or two sentences about non-obvious behavior. Write "None" if nothing stands out.
+
+## After All Files
+
+Review the Module Connections section at the bottom of the report. If the changes to the files above affect entry points, data flows, or config dependencies, update that section too. Otherwise leave it as-is."""
+
+
+def plan_update(changed_files: list[str], report_dir: str) -> dict:
+    """
+    Find which existing reports contain the changed files and generate
+    targeted subagent commands to re-analyze only those files in-place.
+    """
+    from pathlib import Path
+    import re
+
+    reports_path = Path(report_dir)
+    if not reports_path.exists():
+        return {
+            "targets": [],
+            "subagent_commands": [],
+            "orphaned_files": changed_files,
+            "summary": f"No reports directory found at {report_dir}",
+        }
+
+    # Parse each report to build a file->report mapping
+    file_to_report: dict[str, str] = {}
+    for report_file in sorted(reports_path.glob("*.md")):
+        content = report_file.read_text(encoding="utf-8")
+        for match in re.finditer(r"- \[[ x]\] `([^`]+)`", content):
+            file_to_report[match.group(1)] = report_file.name
+
+    # Group changed files by which report they belong to
+    targets: dict[str, list[str]] = {}
+    orphaned: list[str] = []
+
+    for cf in changed_files:
+        if cf in file_to_report:
+            rname = file_to_report[cf]
+            if rname not in targets:
+                targets[rname] = []
+            targets[rname].append(cf)
+        else:
+            orphaned.append(cf)
+
+    # Build targeted subagent commands
+    target_list = []
+    commands = []
+
+    for report_name, files in sorted(targets.items()):
+        report_path = f"{report_dir}/{report_name}"
+
+        target_list.append({
+            "report_file": report_path,
+            "files_to_update": files,
+        })
+
+        prompt = build_update_prompt(files, report_path)
+
+        context_files = [{"path": report_path}]
+        context_files.extend({"path": fp} for fp in files)
+
+        commands.append({
+            "name": "general-task-execution",
+            "prompt": prompt,
+            "explanation": f"Update: Re-analyze {len(files)} changed file(s) in {report_path}",
+            "contextFiles": context_files,
+        })
+
+    summary_parts = [f"{len(commands)} report(s) to update, {sum(len(t['files_to_update']) for t in target_list)} file(s) to re-analyze"]
+    if orphaned:
+        summary_parts.append(f"{len(orphaned)} changed file(s) not in any existing report")
+
+    return {
+        "targets": target_list,
+        "subagent_commands": commands,
+        "orphaned_files": orphaned,
+        "summary": ", ".join(summary_parts),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="Plan subagent assignments from scanner output"
@@ -391,6 +501,12 @@ def main():
         default=None,
         help="Create report skeleton files in DIR (e.g., docs/.cartographer/reports)",
     )
+    parser.add_argument(
+        "--update-mode",
+        metavar="CHANGED_FILES",
+        default=None,
+        help="Comma-separated list of changed file paths. Finds which existing reports contain these files and generates targeted subagent commands to re-analyze only those files in-place. Requires --output-reports to point to the existing reports directory.",
+    )
 
     args = parser.parse_args()
 
@@ -407,12 +523,21 @@ def main():
         exclude_locale=not args.include_locale,
     )
 
-    if args.output_reports:
-        created = generate_report_skeletons(result, args.output_reports)
-        result["report_files"] = created
-        result["subagent_commands"] = generate_subagent_commands(result, args.output_reports)
+    report_dir = args.output_reports or "docs/.cartographer/reports"
+
+    if args.update_mode:
+        # Update mode: find changed files in existing reports, generate targeted commands
+        changed_files = [f.strip() for f in args.update_mode.split(",") if f.strip()]
+        update_result = plan_update(changed_files, report_dir)
+        result["mode"] = "update"
+        result["update"] = update_result
+        # Don't create new skeletons or full-scan commands
     else:
-        result["subagent_commands"] = generate_subagent_commands(result)
+        result["mode"] = "full"
+        if args.output_reports:
+            created = generate_report_skeletons(result, report_dir)
+            result["report_files"] = created
+        result["subagent_commands"] = generate_subagent_commands(result, report_dir)
 
     print(json.dumps(result, indent=2))
 

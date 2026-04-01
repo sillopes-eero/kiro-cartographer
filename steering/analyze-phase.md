@@ -10,6 +10,7 @@ Two-pass analysis with disk-persisted reports for resilience. Subagent reports a
 - Even for small codebases (under 100,000 tokens), at least one subagent must be used.
 - Each subagent **writes its report to disk** before returning. This ensures completed work survives if other subagents fail.
 - Skip locale/i18n files (e.g., files under `locales/`, `i18n/`, `translations/`, or `_locales/` directories, and files like `*.po`, `*.mo`, `*.xliff`). These contain repeated translated strings across languages and don't provide architectural insight.
+- In Update Mode, **never overwrite or regenerate entire reports**. Existing reports in `docs/.cartographer/reports/` are preserved. Subagents only update the specific file sections that changed, using strReplace within the existing report files.
 
 ## Report Directory
 
@@ -97,6 +98,17 @@ For each module, **append** (do not replace) cross-cutting analysis:
 3. **Cross-module dependencies**: What this module imports from other modules, and what other modules depend on it. Use the import/export info from Pass 1 to trace these connections.
 4. **Architectural patterns**: Patterns that span multiple files (e.g., a middleware chain, plugin system, layered architecture).
 5. **Module-level gotchas**: Aggregate warnings that emerge from combining individual file gotchas.
+
+### Step 2b-update: Cross-Reference Against Diff (Update Mode Only)
+
+If running in Update Mode, the Check phase produced a list of renamed and removed symbols. Before writing enriched reports:
+
+1. Read the renamed/removed symbols list from the Check phase.
+2. For each **existing report** (not just the ones being re-analyzed), search for references to old/removed symbol names.
+3. If a report for an unchanged module references a renamed symbol, update that reference in-place.
+4. If a report references a removed symbol, flag it with `⚠️ <symbol> was removed` or remove the stale reference.
+
+This ensures that even reports for modules that weren't re-analyzed stay consistent with the latest code.
 
 ### Step 2c: Write Enriched Reports
 

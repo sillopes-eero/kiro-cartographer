@@ -144,11 +144,24 @@ Record the Split_Mode decision for use in the Synthesize & Write phase.
 
 If the workflow is running in **Update Mode** (set during the Check phase):
 
-- From the list of changed files identified in the Check phase, determine which modules contain changes.
-- Only create subagent assignments for modules that have at least one changed file.
-- Unchanged modules will not be re-analyzed — their existing sections in CODEBASE_MAP.md (or their per-module files in Split_Mode) will be preserved as-is.
+Run the planner with `--update-mode` passing the comma-separated list of changed files (directly changed + indirectly affected from the semantic diff):
 
-If the workflow is running in **full mapping mode**, assign all modules to subagents.
+```bash
+uv run <POWER_ROOT>/scripts/scan-codebase.py . --format json | uv run <POWER_ROOT>/scripts/plan-assignments.py - --output-reports docs/.cartographer/reports --update-mode "<file1>,<file2>,..."
+```
+
+The planner will:
+
+1. **Not overwrite** any existing report files.
+2. Find which existing reports contain the changed files.
+3. Generate targeted `subagent_commands` that only re-analyze those specific files within their reports.
+4. Report any `orphaned_files` — changed files not found in any existing report (these are new files that need a fresh report).
+
+Use the `update.subagent_commands` from the output (not the top-level `subagent_commands`).
+
+For orphaned files (new files not in any report), create a new report skeleton manually or re-run in full mode.
+
+If the workflow is running in **full mapping mode**, use the regular planner invocation without `--update-mode`.
 
 ## Output
 

@@ -76,8 +76,40 @@ If both git-based methods fail (git unavailable, not a git repository, etc.):
 Changes have been detected. Set the workflow to **Update Mode**:
 
 - Record the list of changed files (from git diff) or changed modules (from git log / scanner diff).
-- Proceed to the Scan phase. During the Plan phase, only modules containing changed files will be assigned to subagents for re-analysis. Unchanged module sections will be preserved as-is.
+
+### 4a. Semantic Diff Analysis
+
+The file list from `git diff --name-only` tells you _which_ files changed, but not _what_ changed inside them. A renamed export can break consumers that didn't change in git. To catch ripple effects:
+
+1. Run a content-aware diff for each changed file:
+
+   ```bash
+   git diff <last_mapped_commit>..HEAD -- <changed_file>
+   ```
+
+2. From the diff output, extract:
+   - **Renamed symbols**: Functions, classes, types, or constants that were renamed (old name on `-` lines, new name on `+` lines).
+   - **Removed exports**: Symbols that appear on `-` lines but have no corresponding `+` line.
+   - **New exports**: Symbols that appear on `+` lines but have no corresponding `-` line.
+
+3. For each renamed or removed symbol, search the codebase for references:
+
+   ```bash
+   grep -rl "<old_symbol_name>" --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" .
+   ```
+
+4. Any file that references a renamed/removed symbol is an **indirectly affected file**. Add its module to the list of modules that need re-analysis, even if the file itself didn't change in git.
+
+5. Record the list of renamed symbols (old name → new name) and removed symbols. Pass this to the Synthesize & Write phase for stale reference scanning in docs.
+
+### 4b. Proceed to Scan Phase
+
+- Proceed to the Scan phase. During the Plan phase, modules containing changed files **and** indirectly affected files will be assigned to subagents for re-analysis.
 - If `split_mode` is `true` in the frontmatter, only the affected per-module files under `docs/codebase_map_modules/` will be regenerated, and their corresponding summaries in `CODEBASE_MAP.md` will be refreshed.
+
+### 4c. Protect Existing Reports
+
+In Update Mode, the planner script must **not** overwrite existing report files in `docs/.cartographer/reports/`. Only create new skeleton files for assignments that don't already have a report, or for modules that need re-analysis. Pass `--update-mode` to the planner to enable this behavior (the planner will skip writing skeletons for reports that already exist and aren't in the re-analysis list).
 
 ## Step 5: Map Is Current
 

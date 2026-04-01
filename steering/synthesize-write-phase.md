@@ -348,13 +348,54 @@ If `split_mode` is `true`:
 6. Update the **Conventions** and **Gotchas** sections only if the re-analyzed modules revealed new cross-cutting concerns.
 7. Update the frontmatter: set `last_mapped_commit` and `last_mapped` to the current values. Update `total_files` and `total_tokens` from the latest scanner output.
 
-### 6d. Preserve Unchanged Content
+### 6d. Scan for Stale References
+
+After updating module sections, scan the entire output for stale symbol references using the renamed/removed symbols list from the Check phase:
+
+1. For each **renamed symbol** (old name → new name):
+   - Search `docs/CODEBASE_MAP.md` for the old name.
+   - Search all files in `docs/.cartographer/reports/` for the old name.
+   - If in Split_Mode, search all files in `docs/codebase_map_modules/` for the old name.
+   - Replace occurrences of the old name with the new name.
+
+2. For each **removed symbol** (no replacement):
+   - Search the same files for the removed name.
+   - If found, flag it with a note: `⚠️ <symbol_name> was removed in the latest update` or remove the reference if it's in a list of exports/imports.
+
+3. Pay special attention to these sections which reference symbols across module boundaries:
+   - **Gotchas** — often references specific function names.
+   - **Data Flow** — references function calls and data transformations.
+   - **Conventions** — may reference naming patterns tied to specific symbols.
+   - **Navigation Guide** — may reference specific entry points by name.
+
+### 6e. Preserve Unchanged Content
 
 When updating, take care to:
 
 - **Not rewrite** module sections that were not re-analyzed. Copy them through as-is.
 - **Not delete** per-module files for modules that were not re-analyzed.
 - **Not alter** the Navigation Guide unless the re-analyzed modules significantly change the codebase structure.
+
+## Step 7: Post-Update Validation
+
+After writing all output files in Update Mode, run a validation pass to catch any remaining stale references:
+
+1. Get the list of removed symbols (symbols that appeared on `-` diff lines but not on `+` lines) from the Check phase.
+
+2. For each removed symbol, grep the generated docs:
+
+   ```bash
+   grep -rn "<removed_symbol>" docs/CODEBASE_MAP.md docs/.cartographer/reports/ docs/codebase_map_modules/ 2>/dev/null
+   ```
+
+3. If any matches are found, these are stale references that slipped through. Fix them:
+   - If the symbol was renamed, replace with the new name.
+   - If the symbol was deleted with no replacement, remove the reference or add a note that it no longer exists.
+   - If the reference is in a report for a module that wasn't re-analyzed, update that report file directly.
+
+4. Report any stale references found and fixed to the user so they're aware of the ripple effects.
+
+This step is only needed in Update Mode. Full mapping mode generates everything fresh, so stale references aren't possible.
 
 ## Error Handling
 
